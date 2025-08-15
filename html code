@@ -15,7 +15,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="hint">Binary Rain — mic reacts to sound • F: fullscreen • B: palette</div>
+<div class="hint">Binary Rain — mic reacts to sound • F: fullscreen</div>
 <script>
 (async function () {
   const canvas = document.getElementById('c');
