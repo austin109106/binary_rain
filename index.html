@@ -15,7 +15,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="hint">Binary Rain — mic reacts to sound • F: fullscreen</div>
+<div class="hint">Binary Rain — click to enable mic • F: fullscreen</div>
   <script type="module">
   import { paletteFromHue } from './palette.js';
   (async function () {
@@ -121,10 +121,13 @@
     requestAnimationFrame(frame);
     const dt = Math.min(0.04, (t - lastT)/1000); lastT = t;
 
-    // If we have audio, update hue/energy first
+    // If we have audio, update hue/energy first. Otherwise run demo mode
     if (started) {
       const ep = getEnergyAndPitch();
       lastHue = ep.hue;
+    } else {
+      lastHue = (lastHue + dt * 40) % 360; // slow hue cycle
+      beatBoost = 1 + Math.sin(t / 500) * 0.3; // gentle pulse
     }
 
     // Background fade using a valid palette derived from lastHue
@@ -133,8 +136,6 @@
     ctx.globalAlpha = 0.30;
     ctx.fillRect(0,0,innerWidth,innerHeight);
     ctx.globalAlpha = 1;
-
-    if (!started) return; // wait for mic to start before drawing glyphs
 
     // Draw columns
     ctx.fillStyle = `hsl(${lastHue}, 90%, 65%)`;
