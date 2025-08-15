@@ -16,8 +16,9 @@
 <body>
 <canvas id="c"></canvas>
 <div class="hint">Binary Rain — mic reacts to sound • F: fullscreen • B: palette</div>
-<script>
-(async function () {
+  <script type="module">
+  import { paletteFromHue } from './palette.js';
+  (async function () {
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
 
@@ -54,14 +55,6 @@
     {base:"#a3ff00", shadow:"#2a3b00"},
     {base:"#ffffff", shadow:"#1a1a1a"}
   ];
-
-  function paletteFromHue(h){
-    if (h < 120)  return 0; // bassy -> green
-    if (h < 200)  return 1; // low-mid -> blue
-    if (h < 280)  return 2; // high-mid -> lime
-    return 3;               // highs -> white
-  }
-
   let palIdxSmoothed = 0;
   function autoPalette(hue){
     const target = paletteFromHue(hue);
