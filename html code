@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Binary Rain – Audio Visualizer</title>
+<style>
+  html, body { margin:0; height:100%; background:#000; overflow:hidden; }
+  canvas { display:block; width:100vw; height:100vh; }
+  .hint {
+    position:fixed; left:12px; bottom:10px; color:#7ee787; font:12px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    opacity:.7; user-select:none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">Binary Rain — mic reacts to sound • F: fullscreen • B: palette</div>
+<script>
+(async function () {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  // Resize
+  function fit() {
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width  = Math.floor(innerWidth  * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  addEventListener('resize', fit, {passive:true}); fit();
+
+  // Audio
+  let audioCtx, analyser, fft, timeData, started=false;
+  async function initAudio() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+    });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.85;
+    src.connect(analyser);
+    fft = new Uint8Array(analyser.frequencyBinCount);
+    timeData = new Float32Array(analyser.fftSize);
+    started = true;
+  }
+
+  // Palettes (auto-switch by pitch)
+  const palettes = [
+    {base:"#00ff95", shadow:"#003a2b"},
+    {base:"#8ddcff", shadow:"#082a36"},
+    {base:"#a3ff00", shadow:"#2a3b00"},
+    {base:"#ffffff", shadow:"#1a1a1a"}
+  ];
+
+  function paletteFromHue(h){
+    if (h < 120)  return 0; // bassy -> green
+    if (h < 200)  return 1; // low-mid -> blue
+    if (h < 280)  return 2; // high-mid -> lime
+    return 3;               // highs -> white
+  }
+
+  let palIdxSmoothed = 0;
+  function autoPalette(hue){
+    const target = paletteFromHue(hue);
+    palIdxSmoothed = palIdxSmoothed * 0.9 + target * 0.1;
+    return palettes[Math.round(palIdxSmoothed)];
+  }
+
+  // Columns
+  const COL_W = 16, CH_H = 18;
+  let cols = [];
+  function resetColumns() {
+    const n = Math.ceil(innerWidth / COL_W);
+    cols = new Array(n).fill(0).map((_, i) => ({
+      x: i * COL_W + 2,
+      y: Math.random() * innerHeight,
+      speed: 1 + Math.random()*1.5,
+      trail: Math.floor(innerHeight / CH_H) + 5
+    }));
+  }
+  resetColumns();
+  addEventListener('resize', resetColumns, {passive:true});
+
+  // Energy & pitch
+  let energyAvg = 0, energyLP = 0, beatBoost = 1;
+  const E_ALPHA = 0.08, LP_ALPHA = 0.2;
+
+  function getEnergyAndPitch() {
+    analyser.getByteFrequencyData(fft);
+    analyser.getFloatTimeDomainData(timeData);
+
+    // Energy
+    let sum = 0;
+    for (let i=0;i<fft.length;i++) sum += fft[i];
+    const energy = (sum / fft.length) / 255;
+    energyAvg = energyAvg*(1-E_ALPHA) + energy*E_ALPHA;
+    const eDelta = Math.max(0, energy - energyAvg);
+    energyLP   = energyLP*(1-LP_ALPHA) + eDelta*LP_ALPHA;
+    beatBoost  = 1 + Math.min(2.2, eDelta*6 + energyLP*10);
+
+    // Pitch (dominant bin)
+    let maxV = 0, idx = 0;
+    for (let i=2;i<fft.length;i++){ if (fft[i] > maxV){ maxV = fft[i]; idx = i; } }
+    const nyquist = audioCtx.sampleRate / 2;
+    const freq = (idx/fft.length) * nyquist;
+
+    // Hue from pitch (log map)
+    let hue = 160;
+    if (freq > 20) {
+      const f = Math.max(20, Math.min(4000, freq));
+      const oct = Math.log2(f/440) + 4.0;
+      hue = (oct * 60 + 240) % 360;
+    }
+    return { energy, hue };
+  }
+
+  // Render
+  ctx.font = "700 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+  function randBit(){ return Math.random() < 0.5 ? "0" : "1"; }
+
+  let lastT = performance.now();
+  let lastHue = 160; // cache a hue so we can draw before audio starts
+
+  function frame(t){
+    requestAnimationFrame(frame);
+    const dt = Math.min(0.04, (t - lastT)/1000); lastT = t;
+
+    // If we have audio, update hue/energy first
+    if (started) {
+      const ep = getEnergyAndPitch();
+      lastHue = ep.hue;
+    }
+
+    // Background fade using a valid palette derived from lastHue
+    const pal = autoPalette(lastHue);
+    ctx.fillStyle = pal.shadow;
+    ctx.globalAlpha = 0.30;
+    ctx.fillRect(0,0,innerWidth,innerHeight);
+    ctx.globalAlpha = 1;
+
+    if (!started) return; // wait for mic to start before drawing glyphs
+
+    // Draw columns
+    ctx.fillStyle = `hsl(${lastHue}, 90%, 65%)`;
+    for (const c of cols){        
+      const steps = Math.ceil(Math.random()*2);
+      for (let s=0; s<steps; s++){
+        ctx.fillText(randBit(), c.x, c.y);
+        c.y += c.speed * beatBoost * (CH_H * 0.65) * dt * 60;
+        if (c.y > innerHeight + CH_H*2){
+          c.y = -Math.random()*200;
+          c.speed = 1 + Math.random()*1.5;
+        }
+      }
+    }
+  }
+
+  // Controls
+  addEventListener('keydown', (e)=>{
+    if (e.key.toLowerCase()==='f'){
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+      else document.exitFullscreen().catch(()=>{});
+    }
+    // Removed 'b' toggle since we’re auto-selecting palettes now
+  });
+
+  // Start on click (mic permission)
+  const startOnce = async () => {
+    document.body.removeEventListener('click', startOnce);
+    try { await initAudio(); } catch (e){ alert("Mic permission/audio source failed."); }
+  };
+  document.body.addEventListener('click', startOnce, {once:true});
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
